@@ -1,20 +1,27 @@
-# XONOMO Anti-Detect Browser
+# XONOMO Anti-Detect Browser v8
 
-Premium anti-detect browser with advanced fingerprint spoofing, CDP injection, and multi-profile management.
+Premium anti-detect browser with advanced fingerprint spoofing, Firebase licensing, and multi-profile management.
 
 ## Features
 
-- **CDP Injection** — Injects fingerprint parameters via Chrome DevTools Protocol on browser launch
+- **undetected_chromedriver** — Automated Chrome with anti-detection built-in
+- **selenium_stealth** — Additional stealth patches on top of UC
+- **CDP Injection** — Full fingerprint override via Chrome DevTools Protocol
 - **WebGL Masking** — Proxied WebGL parameters (vendor, renderer, extensions) per profile
-- **Canvas Noise** — Unique canvas fingerprint per profile via noise table injection
-- **Binary Patching** — Removes `cdc_`, `webdriver` and automation strings from chromedriver/chrome
-- **JS Runtime Protection** — `toString()` spoofing so websites can't detect overridden functions
+- **Canvas Noise** — 100% unique canvas fingerprint per profile via noise table
+- **Binary Patching** — Removes `cdc_`, `$wdc_` automation strings from chromedriver
+- **JS Runtime Protection** — `toString()` spoofing with WeakMap/WeakSet
+- **Dynamic Battery Masking** — Realistic live battery drain/charge simulation
+- **WebRTC Masking/Locking** — Mask or fully disable WebRTC per profile
 - **Navigator/Screen/Audio/Timezone Spoofing** — Full browser fingerprint control
-- **Profile Management** — Create, search, run, delete profiles with SQLite storage
-- **Android Screen Mode** — Mobile emulation with proper mouse scroll support
-- **Full Screen Mode** — Desktop full-screen browser launch
-- **License System** — Admin approval, expiry date, and hardware-locked licensing
-- **Search Profiles** — Search by profile name or number
+- **Cookie Collection** — All Cookie / Site Cookie export (Netscape .txt or .json)
+- **Profile Management** — Create, search, rename, launch, delete profiles
+- **Android Screen Mode** — Mobile emulation with touch event simulation
+- **Full Screen Mode** — Desktop full-screen browser with mobile fingerprint
+- **Firebase License System** — Admin approval, expiry, hardware-lock, cross-device login
+- **Admin Broadcast Messages** — Real-time message popup from admin panel
+- **Proxy Auth Extension** — Built-in Chrome extension for authenticated proxies
+- **Portable Chromium Support** — Use bundled Chromium instead of system Chrome
 
 ## Installation
 
@@ -22,10 +29,10 @@ Premium anti-detect browser with advanced fingerprint spoofing, CDP injection, a
 pip install -r requirements.txt
 ```
 
-## Usage
+## Usage (Single File)
 
 ```bash
-python main.py
+python xonomo_antidetect.py
 ```
 
 ## Building EXE
@@ -35,16 +42,20 @@ See [NUITKA_GUIDE.md](NUITKA_GUIDE.md) for complete Nuitka EXE conversion instru
 ## Project Structure
 
 ```
-├── main.py                  # Entry point
-├── gui_app.py               # PyQt5 GUI application
-├── browser_core.py          # CDP injection, binary patching, JS protection
-├── fingerprint_generator.py # Fingerprint parameter generation
-├── profile_manager.py       # Profile CRUD with SQLite
-├── license_manager.py       # License validation & enforcement
+├── xonomo_antidetect.py     # Complete application (single file)
 ├── requirements.txt         # Python dependencies
 ├── NUITKA_GUIDE.md         # EXE build guide (Bengali)
 └── README.md               # This file
 ```
+
+## Dependencies
+
+- `PyQt6` — GUI framework
+- `undetected-chromedriver` — Anti-detection Chrome driver
+- `selenium-stealth` — Additional stealth patches
+- `fake-useragent` — Random user agent generation
+- `requests` — HTTP requests for proxy validation & IP lookup
+- `firebase-admin` — Firebase Firestore for license management
 
 ## License
 

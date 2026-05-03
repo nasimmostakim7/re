@@ -66,7 +66,7 @@ pip install -r requirements.txt
 Nuitka নিজেই MinGW ডাউনলোড করতে পারে:
 
 ```bash
-python -m nuitka --mingw64 main.py
+python -m nuitka --mingw64 xonomo_antidetect.py
 ```
 
 প্রথমবার রান করলে Nuitka স্বয়ংক্রিয়ভাবে MinGW-w64 ডাউনলোড ও সেটআপ করবে।
@@ -94,15 +94,15 @@ choco install mingw
 ### সবচেয়ে সহজ কমান্ড
 
 ```bash
-python -m nuitka main.py
+python -m nuitka xonomo_antidetect.py
 ```
 
-এটি `main.exe` তৈরি করবে একই ফোল্ডারে।
+এটি `xonomo_antidetect.exe` তৈরি করবে একই ফোল্ডারে।
 
 ### টেস্ট রান
 
 ```bash
-main.exe
+xonomo_antidetect.exe
 ```
 
 ---
@@ -115,8 +115,8 @@ main.exe
 python -m nuitka ^
     --mingw64 ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
-    main.py
+    --enable-plugin=pyqt6 ^
+    xonomo_antidetect.py
 ```
 
 ### অপ্টিমাইজড বিল্ড (প্রোডাকশন)
@@ -125,10 +125,10 @@ python -m nuitka ^
 python -m nuitka ^
     --mingw64 ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --lto=yes ^
     --jobs=4 ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### ফ্ল্যাগ ব্যাখ্যা
@@ -137,7 +137,7 @@ python -m nuitka ^
 |---------|-----|
 | `--mingw64` | MinGW-w64 কম্পাইলার ব্যবহার |
 | `--follow-imports` | সকল ইম্পোর্ট করা মডিউল কম্পাইল করে |
-| `--enable-plugin=pyqt5` | PyQt5 সাপোর্ট |
+| `--enable-plugin=pyqt6` | PyQt5 সাপোর্ট |
 | `--lto=yes` | Link Time Optimization (ছোট ও দ্রুত EXE) |
 | `--jobs=4` | ৪টি CPU কোর দিয়ে বিল্ড (দ্রুত) |
 
@@ -154,18 +154,18 @@ python -m nuitka ^
     --mingw64 ^
     --standalone ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --include-data-dir=.=. ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### আউটপুট ফোল্ডার স্ট্রাকচার
 
 ```
 build/
-└── main.dist/
-    ├── main.exe          ← মূল EXE ফাইল
+└── xonomo_antidetect.dist/
+    ├── xonomo_antidetect.exe          ← মূল EXE ফাইল
     ├── python311.dll     ← Python DLL
     ├── PyQt5/            ← PyQt5 লাইব্রেরি
     ├── *.dll             ← প্রয়োজনীয় DLL ফাইল
@@ -174,7 +174,7 @@ build/
 
 ### ডিস্ট্রিবিউশন
 
-`main.dist` ফোল্ডারটি ZIP করে যেকোনো Windows কম্পিউটারে পাঠাতে পারবেন। Python ইনস্টল থাকার দরকার নেই।
+`xonomo_antidetect.dist` ফোল্ডারটি ZIP করে যেকোনো Windows কম্পিউটারে পাঠাতে পারবেন। Python ইনস্টল থাকার দরকার নেই।
 
 ---
 
@@ -187,9 +187,9 @@ python -m nuitka ^
     --mingw64 ^
     --onefile ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### OneFile vs Standalone
@@ -216,10 +216,10 @@ python -m nuitka ^
     --mingw64 ^
     --onefile ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --windows-icon-from-ico=icon.ico ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### সম্পূর্ণ মেটাডেটা সহ
@@ -229,7 +229,7 @@ python -m nuitka ^
     --mingw64 ^
     --onefile ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --windows-icon-from-ico=icon.ico ^
     --windows-company-name="XONOMO" ^
     --windows-product-name="XONOMO Anti-Detect Browser" ^
@@ -237,7 +237,7 @@ python -m nuitka ^
     --windows-product-version=1.0.0.0 ^
     --windows-file-description="Premium Anti-Detect Browser" ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### UAC Admin Rights (যদি দরকার)
@@ -302,7 +302,7 @@ Nuitka দিয়ে তৈরি EXE কিছু antivirus detect করত�
 
 ```bash
 # Code signing certificate ব্যবহার করুন (প্রোডাকশনে):
-signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com main.exe
+signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com xonomo_antidetect.exe
 
 # অথবা antivirus-এ exception যোগ করুন
 ```
@@ -325,7 +325,7 @@ python -m nuitka ^
     --mingw64 ^
     --onefile ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --include-module=websocket ^
     --include-module=sqlite3 ^
     --include-module=json ^
@@ -345,7 +345,7 @@ python -m nuitka ^
     --nofollow-import-to=tkinter ^
     --nofollow-import-to=setuptools ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 ```
 
 ### Linux/Mac-এ বিল্ড করতে (^ এর বদলে \ ব্যবহার করুন):
@@ -353,14 +353,14 @@ python -m nuitka ^
 ```bash
 python -m nuitka \
     --follow-imports \
-    --enable-plugin=pyqt5 \
+    --enable-plugin=pyqt6 \
     --standalone \
     --include-module=websocket \
     --include-module=sqlite3 \
     --lto=yes \
     --jobs=4 \
     --output-dir=build \
-    main.py
+    xonomo_antidetect.py
 ```
 
 ---
@@ -400,7 +400,7 @@ python -m nuitka ^
     --mingw64 ^
     --onefile ^
     --follow-imports ^
-    --enable-plugin=pyqt5 ^
+    --enable-plugin=pyqt6 ^
     --include-module=websocket ^
     --include-module=sqlite3 ^
     --lto=yes ^
@@ -414,13 +414,13 @@ python -m nuitka ^
     --nofollow-import-to=test ^
     --nofollow-import-to=tkinter ^
     --output-dir=build ^
-    main.py
+    xonomo_antidetect.py
 
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ============================================
     echo   BUILD SUCCESSFUL!
-    echo   EXE Location: build\main.exe
+    echo   EXE Location: build\xonomo_antidetect.exe
     echo ============================================
 ) else (
     echo.
@@ -436,7 +436,7 @@ pause
 2. প্রজেক্ট ফোল্ডারে যান: cd path\to\project
 3. build.bat রান করুন
 4. 5-15 মিনিট অপেক্ষা করুন
-5. build\main.exe ফাইলটি পাবেন
+5. build\xonomo_antidetect.exe ফাইলটি পাবেন
 ```
 
 ---
