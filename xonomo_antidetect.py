@@ -939,6 +939,27 @@ class BrowserThread(QThread):
         opts.add_argument("--disable-blink-features=AutomationControlled")
         opts.add_argument("--no-sandbox"); opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--disable-infobars")
+
+        # ── Set WebRTC IP handling policy via Chrome preferences ──────
+        # Uses Preferences file instead of --force-webrtc-ip-handling-policy
+        # flag to avoid Chrome's "unsupported flag" warning banner.
+        if proxy:
+            prefs_dir = os.path.join(pdir, "Default")
+            os.makedirs(prefs_dir, exist_ok=True)
+            prefs_file = os.path.join(prefs_dir, "Preferences")
+            prefs = {}
+            if os.path.exists(prefs_file):
+                try:
+                    with open(prefs_file, "r", encoding="utf-8") as pf:
+                        prefs = json.load(pf)
+                except Exception:
+                    prefs = {}
+            prefs.setdefault("webrtc", {})["ip_handling_policy"] = "disable_non_proxied_udp"
+            try:
+                with open(prefs_file, "w", encoding="utf-8") as pf:
+                    json.dump(prefs, pf, ensure_ascii=False)
+            except Exception:
+                pass
         opts.add_argument(f"--user-agent={fp['device']['ua']}")
         opts.add_argument(f"--lang={fp['languages'][0]}")
 
@@ -974,15 +995,12 @@ class BrowserThread(QThread):
                 opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
 
         # ── Proxy IP leak prevention ──────────────────────────────
-        # When ANY proxy is set, force WebRTC to only use proxied UDP
-        # and override webrtc_mode to 'lock'. The actual IP leak prevention
-        # is done via deep JS injection (below) that kills RTCPeerConnection.
+        # When proxy is set, force webrtc_mode to 'lock'.
+        # WebRTC IP leak prevention is handled entirely via deep JS injection
+        # (kills RTCPeerConnection) — no command-line flags needed,
+        # which also avoids Chrome's "unsupported flag" warning banner.
         if px_info:
-            opts.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
             webrtc_mode = "lock"
-
-        if webrtc_mode=="lock":
-            opts.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
 
         with _CHROME_LAUNCH_LOCK:
             _patch_chromedriver_binary()   # Remove $cdc_ automation strings
@@ -1060,28 +1078,67 @@ class BrowserThread(QThread):
                 except Exception:
                     pass
             # full_screen: window already maximized via --start-maximized
-            # Step 5: Inject mouse-wheel → touch scroll translation
-            # This makes mousewheel scroll work on touch-only pages.
+            # Step 5: Realistic touch emulation
+            # Converts mouse wheel → smooth inertia scroll (like finger flick)
+            # Also adds long-press detection and proper touch event timing.
             drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": """
-(function patchWheelToTouch(){
-  document.addEventListener('wheel', function(e){
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if(!el) return;
-    const dy = e.deltaY;
-    // Synthesize touchstart → touchmove → touchend to simulate scroll
-    const startY = e.clientY;
-    const touch = new Touch({identifier: Date.now(), target: el,
-      clientX: e.clientX, clientY: startY, radiusX:1, radiusY:1,
-      rotationAngle:0, force:1});
-    const endTouch = new Touch({identifier: touch.identifier, target: el,
-      clientX: e.clientX, clientY: startY - dy, radiusX:1, radiusY:1,
-      rotationAngle:0, force:1});
-    try {
-      el.dispatchEvent(new TouchEvent('touchstart',{touches:[touch],changedTouches:[touch],bubbles:true,cancelable:true}));
-      el.dispatchEvent(new TouchEvent('touchmove',{touches:[endTouch],changedTouches:[endTouch],bubbles:true,cancelable:true}));
-      el.dispatchEvent(new TouchEvent('touchend',{touches:[],changedTouches:[endTouch],bubbles:true,cancelable:true}));
-    } catch(ex){}
-  }, {passive:true});
+(function realisticTouch(){
+'use strict';
+// ── Inertia scroll: wheel → smooth touch drag with deceleration ──
+let _scrollAnim = null;
+document.addEventListener('wheel', function(e){
+  e.preventDefault();
+  const el = document.elementFromPoint(e.clientX, e.clientY) || document.body;
+  const cx = e.clientX || window.innerWidth/2;
+  const startY = e.clientY || window.innerHeight/2;
+  const velocity = -e.deltaY * 2.5;  // flick velocity
+  const id = Date.now();
+  const mkTouch = (y) => new Touch({
+    identifier:id, target:el,
+    clientX:cx, clientY:y, screenX:cx, screenY:y,
+    pageX:cx, pageY:y+window.scrollY,
+    radiusX:11.5, radiusY:11.5, rotationAngle:0, force:0.8
+  });
+  const fire = (type, y, touches) => {
+    try{ el.dispatchEvent(new TouchEvent(type,{
+      bubbles:true, cancelable:true,
+      touches: touches ? [mkTouch(y)] : [],
+      targetTouches: touches ? [mkTouch(y)] : [],
+      changedTouches:[mkTouch(y)]
+    })); }catch(e){}
+  };
+  if(_scrollAnim) cancelAnimationFrame(_scrollAnim);
+  fire('touchstart', startY, true);
+  let v = velocity, curY = startY, frame = 0;
+  const step = () => {
+    v *= 0.92;  // friction deceleration
+    curY += v * 0.016;
+    fire('touchmove', curY, true);
+    if(Math.abs(v) > 1 && frame < 60){
+      frame++; _scrollAnim = requestAnimationFrame(step);
+    } else {
+      fire('touchend', curY, false);
+      _scrollAnim = null;
+    }
+  };
+  _scrollAnim = requestAnimationFrame(step);
+}, {passive:false});
+
+// ── Long-press: mousedown > 500ms without move → contextmenu ──
+let _lpTimer = null, _lpMoved = false;
+document.addEventListener('mousedown', function(e){
+  _lpMoved = false;
+  _lpTimer = setTimeout(function(){
+    if(!_lpMoved){
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if(el) try{ el.dispatchEvent(new MouseEvent('contextmenu',{
+        bubbles:true, clientX:e.clientX, clientY:e.clientY
+      })); }catch(x){}
+    }
+  }, 500);
+});
+document.addEventListener('mousemove', function(){ _lpMoved = true; });
+document.addEventListener('mouseup', function(){ if(_lpTimer) clearTimeout(_lpTimer); });
 })();
 """})
 
@@ -1172,51 +1229,11 @@ Document.prototype.createElement = function(tag){
         drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument",
                             {"source":_build_js(fp,webrtc_mode)})
 
-        # ── Mobile: inject wheel→touch scroll so mouse scroll works ──
-        if am == "mobile":
-            drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": """
-(function(){
-  // Convert mouse wheel events to touch scroll sequences.
-  // This makes mouse wheel scrolling work naturally on mobile pages.
-  let _lastY = window.innerHeight / 2;
-  document.addEventListener('wheel', function(e) {
-    const target = e.target || document.body;
-    const startY = _lastY;
-    const endY   = _lastY - e.deltaY * 0.5;
-    const cx     = e.clientX || window.innerWidth / 2;
-    const id     = Date.now();
-    const _touch = (y) => ({
-      identifier: id, target: target,
-      clientX: cx, clientY: y, screenX: cx, screenY: y,
-      pageX: cx, pageY: y + window.scrollY,
-      radiusX: 11.5, radiusY: 11.5, rotationAngle: 0, force: 1,
-    });
-    try {
-      target.dispatchEvent(new TouchEvent('touchstart', {
-        bubbles:true, cancelable:true,
-        touches:[new Touch(_touch(startY))],
-        targetTouches:[new Touch(_touch(startY))],
-        changedTouches:[new Touch(_touch(startY))]
-      }));
-      target.dispatchEvent(new TouchEvent('touchmove', {
-        bubbles:true, cancelable:true,
-        touches:[new Touch(_touch(endY))],
-        targetTouches:[new Touch(_touch(endY))],
-        changedTouches:[new Touch(_touch(endY))]
-      }));
-      target.dispatchEvent(new TouchEvent('touchend', {
-        bubbles:true, cancelable:true,
-        touches:[], targetTouches:[],
-        changedTouches:[new Touch(_touch(endY))]
-      }));
-      _lastY = endY;
-    } catch(err) {}
-  }, {passive: true});
-})();
-"""})
-
-        # Open blank page — no redirect to external sites
-        try: drv.get("about:blank")
+        # ── Open start page ──────────────────────────────────────
+        # Mobile: open Google (renders as Android Chrome new tab)
+        # Desktop: open about:blank
+        start_url = "https://www.google.com" if am == "mobile" else "about:blank"
+        try: drv.get(start_url)
         except Exception as e:
             if not _is_close_event(e): raise
         return drv
