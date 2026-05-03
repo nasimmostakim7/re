@@ -335,6 +335,16 @@ def get_lang_for_ip(ip: str = "") -> list:
 def parse_proxy(raw: str) -> dict:
     raw = raw.strip(); scheme = "http"
     if "://" in raw: scheme, raw = raw.split("://",1); scheme = scheme.lower()
+    # Support user:pass@host:port format (common in proxy lists)
+    if "@" in raw:
+        creds, hostport = raw.rsplit("@",1)
+        cparts = creds.split(":",1)
+        hparts = hostport.split(":")
+        user = cparts[0] if len(cparts)>=1 else ""
+        pwd  = cparts[1] if len(cparts)>=2 else ""
+        host = hparts[0] if len(hparts)>=1 else ""
+        port = hparts[1] if len(hparts)>=2 else "8080"
+        return {"host":host,"port":port,"user":user,"pass":pwd,"scheme":scheme}
     parts = raw.split(":")
     if len(parts) == 2: return {"host":parts[0],"port":parts[1],"user":"","pass":"","scheme":scheme}
     if len(parts) == 3: return {"host":parts[0],"port":parts[1],"user":parts[2],"pass":"","scheme":scheme}
@@ -344,11 +354,54 @@ def parse_proxy(raw: str) -> dict:
 def build_proxy_extension(host,port,user,pwd,scheme="http") -> str:
     manifest = {"version":"1.0.0","manifest_version":2,"name":"XONOMO Proxy Auth",
                 "permissions":["proxy","tabs","unlimitedStorage","storage","<all_urls>","webRequest","webRequestBlocking"],
-                "background":{"scripts":["background.js"]},"minimum_chrome_version":"22.0.0"}
+                "background":{"scripts":["background.js"],"persistent":True},"minimum_chrome_version":"22.0.0"}
+    # Use "http" scheme for proxy config regardless of input — Chrome proxy API
+    # uses "http" for both HTTP and HTTPS CONNECT proxies.
+    # SOCKS proxies use "socks5" scheme.
+    px_scheme = "socks5" if scheme.startswith("socks") else "http"
     bg = f"""
-var config={{mode:"fixed_servers",rules:{{singleProxy:{{scheme:"{scheme}",host:"{host}",port:parseInt("{port}")}},bypassList:["localhost","127.0.0.1"]}}}};
-chrome.proxy.settings.set({{value:config,scope:"regular"}},function(){{}});
-chrome.webRequest.onAuthRequired.addListener(function(d){{return{{authCredentials:{{username:"{user}",password:"{pwd}"}}}}}},{{urls:["<all_urls>"]}},["blocking"]);
+// XONOMO Proxy Authentication Extension
+// Sets proxy for ALL browser traffic and handles auth challenges.
+var config = {{
+  mode: "fixed_servers",
+  rules: {{
+    singleProxy: {{
+      scheme: "{px_scheme}",
+      host: "{host}",
+      port: parseInt("{port}")
+    }},
+    bypassList: []
+  }}
+}};
+
+// Apply proxy settings immediately on extension load
+chrome.proxy.settings.set(
+  {{value: config, scope: "regular"}},
+  function() {{
+    if (chrome.runtime.lastError) {{
+      console.error('[XONOMO] Proxy set error:', chrome.runtime.lastError);
+    }}
+  }}
+);
+
+// Handle proxy authentication (407 responses)
+chrome.webRequest.onAuthRequired.addListener(
+  function(details) {{
+    return {{
+      authCredentials: {{
+        username: "{user}",
+        password: "{pwd}"
+      }}
+    }};
+  }},
+  {{urls: ["<all_urls>"]}},
+  ["blocking"]
+);
+
+// Prevent proxy errors from showing error pages
+chrome.proxy.onProxyError.addListener(function(details) {{
+  console.error('[XONOMO] Proxy error:', details);
+}});
 """
     d = tempfile.mkdtemp(prefix="xonomo_px_")
     with open(os.path.join(d,"manifest.json"),"w") as f: json.dump(manifest,f,indent=2)
@@ -365,7 +418,17 @@ def validate_proxy(raw: str) -> tuple[bool, str]:
     test = (f"{p['scheme']}://{p['user']}:{p['pass']}@{p['host']}:{p['port']}"
             if p["user"] and p["pass"] else f"{p['scheme']}://{p['host']}:{p['port']}")
     try:
-        requests.get("http://ip-api.com/json/",proxies={"http":test,"https":test},timeout=8)
+        # Get IP through proxy
+        resp = requests.get("http://ip-api.com/json/",proxies={"http":test,"https":test},timeout=10)
+        proxy_data = resp.json()
+        proxy_ip = proxy_data.get("query","")
+        # Get local IP for comparison
+        try:
+            local_ip = requests.get("http://ip-api.com/json/",timeout=5).json().get("query","")
+        except Exception:
+            local_ip = ""
+        if proxy_ip and local_ip and proxy_ip == local_ip:
+            return False,f"Proxy not masking IP — proxy returns same IP as local: {local_ip}"
         return True,""
     except Exception as e:
         return False,f"Proxy unreachable: '{p['host']}:{p['port']}'\n{str(e)[:150]}"
@@ -906,13 +969,33 @@ class BrowserThread(QThread):
                 # This is like GoLogin's "Full Screen" — big window, mobile fingerprint.
                 opts.add_argument("--start-maximized")
 
+        # ── Proxy setup ──────────────────────────────────────────────
+        # Always set --proxy-server when proxy is configured. This ensures
+        # Chrome routes ALL traffic through the proxy from the very first request.
+        # For authenticated proxies, the extension handles the 407 auth challenge.
+        if px_info:
+            opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
+
         if has_auth:
             self._ext_dir=build_proxy_extension(px_info["host"],px_info["port"],
                                                  px_info["user"],px_info["pass"],px_info["scheme"])
             opts.add_argument(f"--load-extension={self._ext_dir}")
         else:
             opts.add_argument("--disable-extensions")
-            if px_info: opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
+
+        # ── Proxy IP leak prevention ──────────────────────────────
+        # When ANY proxy is set, force all WebRTC to go through proxy
+        # and prevent DNS leaks. This is critical for whoer.net etc.
+        if px_info:
+            opts.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+            opts.add_argument("--disable-features=WebRtcHideLocalIpsWithMdns")
+            opts.add_argument("--enforce-webrtc-ip-permission-check")
+            # Force DNS resolution through proxy (prevent DNS leak)
+            if px_info["scheme"] in ("socks5", "socks"):
+                opts.add_argument("--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1")
+            # Override webrtc_mode to 'lock' when proxy is active
+            # This ensures WebRTC cannot leak real IP under any circumstance
+            webrtc_mode = "lock"
 
         if webrtc_mode=="lock":
             opts.add_argument("--disable-webrtc")
@@ -1039,6 +1122,70 @@ class BrowserThread(QThread):
 
         stealth(drv,languages=fp["languages"],vendor="Google Inc.",platform=fp["platform"],
                 webgl_vendor=fp["gpu_vendor"],renderer=fp["gpu_renderer"],fix_hairline=True)
+
+        # ── Deep WebRTC/IP leak kill when proxy is active ─────────
+        # Injected BEFORE main JS so it runs first on every new document.
+        # This completely prevents any WebRTC-based IP detection
+        # (whoer.net, browserleaks.com, ipleak.net, etc.)
+        if px_info:
+            drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": """
+(function(){
+'use strict';
+// ── Kill RTCPeerConnection completely ──
+// This prevents WebRTC from exposing real IP via STUN/TURN
+const _undef = undefined;
+const _noop = function(){};
+const _rejectPromise = function(){ return Promise.reject(new DOMException('WebRTC is disabled','NotAllowedError')); };
+
+// Remove all existing RTC constructors
+['RTCPeerConnection','webkitRTCPeerConnection','mozRTCPeerConnection',
+ 'RTCSessionDescription','RTCIceCandidate','RTCDataChannel',
+ 'webkitRTCSessionDescription','mozRTCSessionDescription'].forEach(function(k){
+  try{ Object.defineProperty(window, k, {
+    get: function(){ return undefined; },
+    set: function(){},
+    configurable: false,
+    enumerable: false
+  }); }catch(e){}
+});
+
+// Kill MediaDevices.getUserMedia to prevent media-based IP leak
+if(navigator.mediaDevices){
+  try{
+    navigator.mediaDevices.getUserMedia = function(){ return Promise.reject(new DOMException('Not allowed','NotAllowedError')); };
+    navigator.mediaDevices.enumerateDevices = function(){ return Promise.resolve([]); };
+  }catch(e){}
+}
+if(navigator.getUserMedia){ try{ navigator.getUserMedia = _noop; }catch(e){} }
+if(navigator.webkitGetUserMedia){ try{ navigator.webkitGetUserMedia = _noop; }catch(e){} }
+
+// Prevent re-creation via iframes
+const _origCE = document.createElement.bind(document);
+const _origCE2 = Document.prototype.createElement;
+Document.prototype.createElement = function(tag){
+  var el = _origCE2.apply(this, arguments);
+  if(tag.toLowerCase() === 'iframe'){
+    var _origAppend = el.__proto__.appendChild || Node.prototype.appendChild;
+    var _patchIframe = function(){
+      try{
+        if(el.contentWindow){
+          ['RTCPeerConnection','webkitRTCPeerConnection','mozRTCPeerConnection'].forEach(function(k){
+            try{ Object.defineProperty(el.contentWindow, k, {
+              get: function(){ return undefined; }, set: function(){},
+              configurable: false
+            }); }catch(e){}
+          });
+        }
+      }catch(e){}
+    };
+    el.addEventListener('load', _patchIframe);
+    setTimeout(_patchIframe, 0);
+  }
+  return el;
+};
+})();
+"""})
+
         drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument",
                             {"source":_build_js(fp,webrtc_mode)})
 
