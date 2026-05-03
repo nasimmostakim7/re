@@ -970,18 +970,18 @@ class BrowserThread(QThread):
                 opts.add_argument("--start-maximized")
 
         # ── Proxy setup ──────────────────────────────────────────────
-        # Always set --proxy-server when proxy is configured. This ensures
-        # Chrome routes ALL traffic through the proxy from the very first request.
-        # For authenticated proxies, the extension handles the 407 auth challenge.
-        if px_info:
-            opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
-
+        # For authenticated proxies: extension handles BOTH routing + auth.
+        #   --proxy-server is NOT set because it conflicts with the extension
+        #   and causes Chrome to show native auth popup (the exact bug).
+        # For non-auth proxies: --proxy-server flag routes all traffic.
         if has_auth:
             self._ext_dir=build_proxy_extension(px_info["host"],px_info["port"],
                                                  px_info["user"],px_info["pass"],px_info["scheme"])
             opts.add_argument(f"--load-extension={self._ext_dir}")
         else:
             opts.add_argument("--disable-extensions")
+            if px_info:
+                opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
 
         # ── Proxy IP leak prevention ──────────────────────────────
         # When ANY proxy is set, force all WebRTC to go through proxy
