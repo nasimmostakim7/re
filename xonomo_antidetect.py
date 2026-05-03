@@ -370,7 +370,7 @@ var config = {{
       host: "{host}",
       port: parseInt("{port}")
     }},
-    bypassList: []
+    bypassList: ["localhost", "127.0.0.1", "<local>"]
   }}
 }};
 
@@ -418,17 +418,7 @@ def validate_proxy(raw: str) -> tuple[bool, str]:
     test = (f"{p['scheme']}://{p['user']}:{p['pass']}@{p['host']}:{p['port']}"
             if p["user"] and p["pass"] else f"{p['scheme']}://{p['host']}:{p['port']}")
     try:
-        # Get IP through proxy
-        resp = requests.get("http://ip-api.com/json/",proxies={"http":test,"https":test},timeout=10)
-        proxy_data = resp.json()
-        proxy_ip = proxy_data.get("query","")
-        # Get local IP for comparison
-        try:
-            local_ip = requests.get("http://ip-api.com/json/",timeout=5).json().get("query","")
-        except Exception:
-            local_ip = ""
-        if proxy_ip and local_ip and proxy_ip == local_ip:
-            return False,f"Proxy not masking IP — proxy returns same IP as local: {local_ip}"
+        requests.get("http://ip-api.com/json/",proxies={"http":test,"https":test},timeout=8)
         return True,""
     except Exception as e:
         return False,f"Proxy unreachable: '{p['host']}:{p['port']}'\n{str(e)[:150]}"
@@ -984,21 +974,14 @@ class BrowserThread(QThread):
                 opts.add_argument(f"--proxy-server={px_info['scheme']}://{px_info['host']}:{px_info['port']}")
 
         # ── Proxy IP leak prevention ──────────────────────────────
-        # When ANY proxy is set, force all WebRTC to go through proxy
-        # and prevent DNS leaks. This is critical for whoer.net etc.
+        # When ANY proxy is set, force WebRTC to only use proxied UDP
+        # and override webrtc_mode to 'lock'. The actual IP leak prevention
+        # is done via deep JS injection (below) that kills RTCPeerConnection.
         if px_info:
             opts.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
-            opts.add_argument("--disable-features=WebRtcHideLocalIpsWithMdns")
-            opts.add_argument("--enforce-webrtc-ip-permission-check")
-            # Force DNS resolution through proxy (prevent DNS leak)
-            if px_info["scheme"] in ("socks5", "socks"):
-                opts.add_argument("--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1")
-            # Override webrtc_mode to 'lock' when proxy is active
-            # This ensures WebRTC cannot leak real IP under any circumstance
             webrtc_mode = "lock"
 
         if webrtc_mode=="lock":
-            opts.add_argument("--disable-webrtc")
             opts.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
 
         with _CHROME_LAUNCH_LOCK:
